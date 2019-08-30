@@ -39,10 +39,16 @@ Command* get_command(const string smtlib, string logic) {
                            .withStringInput(smtlib)
                            .withInputLanguage(d_lang)
                            .build();
-        std::unique_ptr<Command> cmd(
+   std::unique_ptr<Command> cmd(
             static_cast<Smt2*>(parser)->setLogic(logic));
-      Command* c = parser->nextCommand();
-      return c;
+   Command* c = parser->nextCommand();
+   return c;
+}
+
+Expr get_expr(DefineFunctionCommand* c) {
+  vector<Expr> arguments = c->getFormals();
+  Expr body = c->getFormula();
+  return body;
 }
 
 string get_code(Expr expr) {
@@ -53,11 +59,8 @@ int main(int argc, char *argv[]) {
   string smtlib = file_to_string(argv[1]);
   Command* c = get_command(smtlib, argv[2]);
   DefineFunctionCommand* dc = static_cast<DefineFunctionCommand*>(c);
-  cout << "panda " << dc->getCommandName() << endl;
- // cout << "panda 1" << endl;
- // cout << "panda 2" << endl;
- // string code = get_code(e);
- // cout << "panda 3" << endl;
+  Expr e = get_expr(dc);
+  cout << e << endl;
 
   return 0;
 }
