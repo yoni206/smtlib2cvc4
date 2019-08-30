@@ -45,6 +45,7 @@ Command* get_command(const string smtlib, string logic) {
    return c;
 }
 
+//extract expr from define-fun command
 Expr get_expr(DefineFunctionCommand* c) {
   vector<Expr> arguments = c->getFormals();
   Expr body = c->getFormula();
