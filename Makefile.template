@@ -6,3 +6,6 @@ smtlib2cvc4.out: smtlib2cvc4.cpp
 
 clean:
 	rm -rf *.out
+
+test: 
+	./test.sh

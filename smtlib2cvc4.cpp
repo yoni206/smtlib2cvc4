@@ -16,6 +16,17 @@ using namespace CVC4::parser;
 using namespace CVC4::language::input;
 using namespace std;
 
+bool is_in(Expr e, vector<Expr> vec) {
+  bool result = false;
+  for (Expr elem : vec) {
+    if (elem == e) {
+      result = true;
+      break;
+    }
+  }
+  return result;
+
+}
 
 string file_to_string(string path) {
   string STRING;
@@ -31,15 +42,14 @@ string file_to_string(string path) {
   return result;
 }
 
-vector<DefineFunctionCommand*> get_commands(const string smtlib, string logic, unique_ptr<api::Solver> & solver) {
+vector<DefineFunctionCommand*> get_commands(const string smtlib, unique_ptr<api::Solver> & solver) {
   InputLanguage d_lang;
   d_lang = LANG_SMTLIB_V2;
       Parser* parser = ParserBuilder(solver.get(), "test")
                            .withStringInput(smtlib)
                            .withInputLanguage(d_lang)
                            .build();
-   unique_ptr<Command> cmd(
-            static_cast<Smt2*>(parser)->setLogic(logic));
+   unique_ptr<Command> cmd(static_cast<Smt2*>(parser)->setLogic("ALL"));
    vector<DefineFunctionCommand*> result;
 
    for (Command* c = parser->nextCommand(); c != NULL; c = parser->nextCommand() ) {
@@ -51,9 +61,9 @@ vector<DefineFunctionCommand*> get_commands(const string smtlib, string logic, u
 
 string to_lower(string s) {
   stringstream ss;
-  std::locale loc;
-  for (std::string::size_type i=0; i<s.length(); ++i)
-    ss << std::tolower(s[i],loc);
+  locale loc;
+  for (string::size_type i=0; i<s.length(); ++i)
+    ss << tolower(s[i],loc);
   return ss.str();
 }
 
@@ -62,7 +72,7 @@ string gen_var_name(Expr e) {
   counter++;
   string result;
 
-  std::stringstream ss;
+  stringstream ss;
   if (e.isConst()) {
     ss << e.getKind() << "_" << e;
   } else {
@@ -72,13 +82,20 @@ string gen_var_name(Expr e) {
   return result;
 }
 
-string mk_node(Kind k, vector<string> defined_children) {
-  std::stringstream ss;
-  ss <<  "nm->mkNode(" << k;
-  for (string child : defined_children) {
-    ss <<  ", " << child;
+string mk_node(Expr e, vector<string> defined_children) {
+  stringstream ss;
+  if (e.getKind() == kind::BITVECTOR_EXTRACT) {
+    int low =  e.getOperator().getConst<BitVectorExtract>().low;
+    int high = e.getOperator().getConst<BitVectorExtract>().high;
+    ss << "CVC4::theory::bv::utils::mkExtract(" << defined_children[0] << ", " << high << ", " <<  low << ");";
+  } else {
+    Kind k = e.getKind();
+    ss <<  "nm->mkNode(" << k;
+    for (string child : defined_children) {
+      ss <<  ", " << child;
+    }
+    ss << ");";
   }
-  ss << ");";
   return ss.str();
 }
 
@@ -103,7 +120,7 @@ string gen_var_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFun
     for (Expr child : e) {
       defined_children.push_back(cache[child].first);
     }
-    return mk_node(e.getKind(), defined_children);
+    return mk_node(e, defined_children);
   }
 
 }
@@ -111,18 +128,22 @@ string gen_var_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFun
 string cache_to_code(unordered_map<Expr, pair<string, string>, ExprHashFunction> cache, Expr e) {
   list<string> definitions;
   vector<Expr> toVisit;
+  vector<Expr> visited;
   toVisit.push_back(e);
   while (! toVisit.empty()) {
     Expr current = toVisit.back();
     toVisit.pop_back();
-    for (Expr child : current) {
-      toVisit.push_back(child);
-    }
-    string name = cache[current].first;
-    string def = cache[current].second;
-    if (def != "") {
-      string line = "Node " + name + " = " + def; 
-      definitions.push_front(line);
+    if (! is_in(current, visited)) {
+      for (Expr child : current) {
+        toVisit.push_back(child);
+      }
+      string name = cache[current].first;
+      string def = cache[current].second;
+      if (def != "") {
+        string line = "Node " + name + " = " + def; 
+        definitions.push_front(line);
+      }
+      visited.push_back(current);
     }
   }
   string result = "";
@@ -132,17 +153,6 @@ string cache_to_code(unordered_map<Expr, pair<string, string>, ExprHashFunction>
   return result;
 }
 
-bool is_in(Expr e, vector<Expr> vec) {
-  bool result = false;
-  for (Expr elem : vec) {
-    if (elem == e) {
-      result = true;
-      break;
-    }
-  }
-  return result;
-
-}
 
 string get_code(DefineFunctionCommand* command, string prefix="") {
   Expr formula = command->getFormula();
@@ -176,7 +186,7 @@ string get_code(DefineFunctionCommand* command, string prefix="") {
       }
     }
   }
-  std::stringstream ss;
+  stringstream ss;
   ss << "// ";
   command->toStream(ss, -1, false, 0, language::output::LANG_SMTLIB_V2);
   ss << endl;
@@ -201,7 +211,8 @@ int main(int argc, char *argv[]) {
   string smtlib = file_to_string(argv[1]);
   unique_ptr<api::Solver> solver;
   solver.reset(new api::Solver());
-  vector<DefineFunctionCommand*> commands = get_commands(smtlib, argv[2], solver);
+  vector<DefineFunctionCommand*> commands = get_commands(smtlib, solver);
+  cout << "#include \"theory/bv/theory_bv_utils.h\"" << endl;
   cout << "using namespace CVC4::kind;" <<endl;
   cout << "using namespace CVC4;" <<endl;
   for (DefineFunctionCommand* command : commands) {
