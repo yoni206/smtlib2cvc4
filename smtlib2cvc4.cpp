@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <locale> 
 
 #include "api/cvc4cpp.h"
 #include "smt/smt_engine.h"
@@ -30,7 +31,7 @@ string file_to_string(string path) {
   return result;
 }
 
-Command* get_command(const string smtlib, string logic, unique_ptr<api::Solver> & solver) {
+vector<DefineFunctionCommand*> get_commands(const string smtlib, string logic, unique_ptr<api::Solver> & solver) {
   InputLanguage d_lang;
   d_lang = LANG_SMTLIB_V2;
       Parser* parser = ParserBuilder(solver.get(), "test")
@@ -39,25 +40,35 @@ Command* get_command(const string smtlib, string logic, unique_ptr<api::Solver> 
                            .build();
    unique_ptr<Command> cmd(
             static_cast<Smt2*>(parser)->setLogic(logic));
-   Command* c = parser->nextCommand();
-   return c;
+   vector<DefineFunctionCommand*> result;
+
+   for (Command* c = parser->nextCommand(); c != NULL; c = parser->nextCommand() ) {
+     DefineFunctionCommand* dc = static_cast<DefineFunctionCommand*>(c);
+     result.push_back(dc);
+   }
+   return result;
 }
 
-//extract expr from define-fun command
-Expr get_expr(DefineFunctionCommand* c) {
-  vector<Expr> arguments = c->getFormals();
-  Expr body = c->getFormula();
-  return body;
+string to_lower(string s) {
+  stringstream ss;
+  std::locale loc;
+  for (std::string::size_type i=0; i<s.length(); ++i)
+    ss << std::tolower(s[i],loc);
+  return ss.str();
 }
 
-string get_var_name(Expr e) {
+string gen_var_name(Expr e) {
   static int counter = 0;
   counter++;
   string result;
 
   std::stringstream ss;
-  ss << e.getKind() << "_" << counter;
-  result = ss.str(); 
+  if (e.isConst()) {
+    ss << e.getKind() << "_" << e;
+  } else {
+    ss << e.getKind() << "_" << counter;
+  }
+  result = to_lower(ss.str());
   return result;
 }
 
@@ -71,10 +82,20 @@ string mk_node(Kind k, vector<string> defined_children) {
   return ss.str();
 }
 
-string get_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFunction> cache) {
+string gen_var_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFunction> cache) {
   int num_of_children = e.getNumChildren();
   if (num_of_children == 0) {
-    return "";
+    if (e.isConst()) {
+      stringstream ss_kind;
+      ss_kind << e.getKind();
+      string k = ss_kind.str();
+      k = k.substr(string("CONST_").size());
+      stringstream ss_def;
+      ss_def <<  "nm->mkConst<" << k << ">(" << e << ");";
+      return ss_def.str();
+    } else {
+      return "";
+    }
   }
   else {
     vector<string> defined_children;
@@ -98,21 +119,38 @@ string cache_to_code(unordered_map<Expr, pair<string, string>, ExprHashFunction>
     }
     string name = cache[current].first;
     string def = cache[current].second;
-    string line = "Expr " + name + " = " + def + ";";
-    definitions.push_front(line);
+    if (def != "") {
+      string line = "Node " + name + " = " + def; 
+      definitions.push_front(line);
+    }
   }
   string result = "";
   for (string def : definitions) {
-    result += "\n" + def;
+    result += def + "\n";
   }
   return result;
 }
 
-string get_code(Expr expr) {
+bool is_in(Expr e, vector<Expr> vec) {
+  bool result = false;
+  for (Expr elem : vec) {
+    if (elem == e) {
+      result = true;
+      break;
+    }
+  }
+  return result;
+
+}
+
+string get_code(DefineFunctionCommand* command, string prefix="") {
+  Expr formula = command->getFormula();
+  Expr func = command->getFunction();
+  vector<Expr> formals = command->getFormals();
   vector<Expr> toVisit;
   //map each Expr to its intended c++ variable name as well as its c++ definition.
   unordered_map<Expr,pair<string, string>, ExprHashFunction> cache;
-  toVisit.push_back(expr);
+  toVisit.push_back(formula);
   while (! toVisit.empty()) {
     Expr current = toVisit.back();
     if (cache.find(current) == cache.end()) {
@@ -123,28 +161,51 @@ string get_code(Expr expr) {
     } else {
       toVisit.pop_back();
       if (cache[current].first == "" && cache[current].second == "") {
-        string name = get_var_name(current);
-        string def = get_def(current, cache);
+        string name;
+        if (is_in(current, formals)) {
+          stringstream ss;
+          ss << current;
+          name = ss.str();
+        } else {
+          name = gen_var_name(current);
+        }
+        string def = gen_var_def(current, cache);
         pair<string, string> p = make_pair(name, def);
         cache[current] = p;
       }
     }
   }
-  string result = cache_to_code(cache, expr);
-  return result;
+  std::stringstream ss;
+  ss << "// ";
+  command.toStream(ss, -1, false, 0, language::)
+  << command << endl;
+  ss << "Node " << prefix << func << "(";
+  for (int i=0; i< formals.size(); i++) {
+    Expr formal = formals[i];
+    ss << "Node " << formal;
+    if (i < formals.size() - 1) {
+      ss << ", ";
+    }
+  }
+  ss << ") {" << endl;
+  ss << "NodeManager* nm = NodeManager::currentNM();" << endl ;
+  string body = cache_to_code(cache, formula);
+  ss << body << "return " << cache[formula].first << ";";
+  ss << endl;
+  ss << "}";
+  return ss.str();
 }
 
 int main(int argc, char *argv[]) {
   string smtlib = file_to_string(argv[1]);
   unique_ptr<api::Solver> solver;
   solver.reset(new api::Solver());
-  Command* c = get_command(smtlib, argv[2], solver);
-  DefineFunctionCommand* dc = static_cast<DefineFunctionCommand*>(c);
-  Expr e = get_expr(dc);
-  string code = get_code(e);
-  cout << code << endl;
-  
-
+  vector<DefineFunctionCommand*> commands = get_commands(smtlib, argv[2], solver);
+  for (DefineFunctionCommand* command : commands) {
+    cout << "using namespace CVC4::kind" <<endl;
+    string code = get_code(command); 
+    cout << code << endl << endl;
+  }
   return 0;
 }
 
