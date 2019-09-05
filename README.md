@@ -1,8 +1,8 @@
 # smtlib2cvc4
 
 ##Prerequisites
-- Same as CVC4
-- + clang-format
+- All of CVC4 requirements
+- clang-format
 
 ##Installation
 - `./configure.sh`
