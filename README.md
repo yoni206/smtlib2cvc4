@@ -1,6 +1,15 @@
 # smtlib2cvc4
-Try it with:
+
+##Prerequisites
+- Same as CVC4
+- + clang-format
+
+##Installation
+- `./configure.sh`
+- `make`
+
+##Usage
+./smtlib2cvc4.sh
 ```
-make
 ./smtlib2cvc4.out example.smt2 QF_LIA
 ```

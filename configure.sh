@@ -1,4 +1,6 @@
 #!/bin/bash
+
+#get a copy of cvc4
 rm -rf CVC4
 git clone git@github.com:CVC4/CVC4.git
 cd CVC4
@@ -9,3 +11,6 @@ contrib/get-antlr-3.4
 cd build
 make -j16
 cd ../../
+
+#make the script runable
+chmod 755 smtlib2cvc4.sh

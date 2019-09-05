@@ -90,6 +90,7 @@ string gen_var_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFun
       ss_kind << e.getKind();
       string k = ss_kind.str();
       k = k.substr(string("CONST_").size());
+      k = k.substr(0,1) +  to_lower(k.substr(1));
       stringstream ss_def;
       ss_def <<  "nm->mkConst<" << k << ">(" << e << ");";
       return ss_def.str();
@@ -177,8 +178,8 @@ string get_code(DefineFunctionCommand* command, string prefix="") {
   }
   std::stringstream ss;
   ss << "// ";
-  command.toStream(ss, -1, false, 0, language::)
-  << command << endl;
+  command->toStream(ss, -1, false, 0, language::output::LANG_SMTLIB_V2);
+  ss << endl;
   ss << "Node " << prefix << func << "(";
   for (int i=0; i< formals.size(); i++) {
     Expr formal = formals[i];
@@ -201,8 +202,9 @@ int main(int argc, char *argv[]) {
   unique_ptr<api::Solver> solver;
   solver.reset(new api::Solver());
   vector<DefineFunctionCommand*> commands = get_commands(smtlib, argv[2], solver);
+  cout << "using namespace CVC4::kind;" <<endl;
+  cout << "using namespace CVC4;" <<endl;
   for (DefineFunctionCommand* command : commands) {
-    cout << "using namespace CVC4::kind" <<endl;
     string code = get_code(command); 
     cout << code << endl << endl;
   }
