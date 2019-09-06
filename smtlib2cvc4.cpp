@@ -2,6 +2,8 @@
 #include <fstream>
 #include <string>
 #include <locale> 
+#include <algorithm>
+#include <iterator>
 
 #include "api/cvc4cpp.h"
 #include "smt/smt_engine.h"
@@ -15,6 +17,8 @@ using namespace CVC4::kind;
 using namespace CVC4::parser;
 using namespace CVC4::language::input;
 using namespace std;
+
+static int counter = 0;
 
 bool is_in(Expr e, vector<Expr> vec) {
   bool result = false;
@@ -42,6 +46,7 @@ string file_to_string(string path) {
   return result;
 }
 
+
 vector<DefineFunctionCommand*> get_commands(const string smtlib, unique_ptr<api::Solver> & solver) {
   InputLanguage d_lang;
   d_lang = LANG_SMTLIB_V2;
@@ -59,6 +64,9 @@ vector<DefineFunctionCommand*> get_commands(const string smtlib, unique_ptr<api:
    return result;
 }
 
+DefineFunctionCommand* get_command(const string smtlib, unique_ptr<api::Solver> & solver) {
+  return get_commands(smtlib, solver)[0];
+}
 string to_lower(string s) {
   stringstream ss;
   locale loc;
@@ -68,7 +76,6 @@ string to_lower(string s) {
 }
 
 string gen_var_name(Expr e) {
-  static int counter = 0;
   counter++;
   string result;
 
@@ -109,8 +116,16 @@ string gen_var_def(Expr e, unordered_map<Expr, pair<string, string>, ExprHashFun
       k = k.substr(string("CONST_").size());
       k = k.substr(0,1) +  to_lower(k.substr(1));
       stringstream ss_def;
-      ss_def <<  "nm->mkConst<" << k << ">(" << e << ");";
-      return ss_def.str();
+      if (k == "Bitvector") {
+        k = "BitVector";
+        BitVector b = e.getConst<BitVector>();
+        ss_def <<  "nm->mkConst<" << k << ">(BitVector(\"" << b << "\"));";
+        return ss_def.str();
+        
+      } else {
+        ss_def <<  "nm->mkConst<" << k << ">(" << e << ");";
+        return ss_def.str();
+      }
     } else {
       return "";
     }
@@ -187,9 +202,6 @@ string get_code(DefineFunctionCommand* command, string prefix="") {
     }
   }
   stringstream ss;
-  ss << "// ";
-  command->toStream(ss, -1, false, 0, language::output::LANG_SMTLIB_V2);
-  ss << endl;
   ss << "Node " << prefix << func << "(";
   for (int i=0; i< formals.size(); i++) {
     Expr formal = formals[i];
@@ -207,16 +219,44 @@ string get_code(DefineFunctionCommand* command, string prefix="") {
   return ss.str();
 }
 
-int main(int argc, char *argv[]) {
-  string smtlib = file_to_string(argv[1]);
+void batch(string smtlib) {
   unique_ptr<api::Solver> solver;
   solver.reset(new api::Solver());
   vector<DefineFunctionCommand*> commands = get_commands(smtlib, solver);
+  for (DefineFunctionCommand* command : commands) {
+    counter = 0;
+    string code = get_code(command); 
+    cout << code << endl << endl;
+  }
+}
+
+vector<string> get_lines(string str) {
+  vector<string> cont;
+  std::stringstream ss(str);
+  std::string token;
+  char delim = '\n';
+  while (std::getline(ss, token, delim)) {
+    if (token != "") {
+      cont.push_back(token);
+    }
+  }
+  return cont;
+}
+
+int main(int argc, char *argv[]) {
+  string smtlib = file_to_string(argv[1]);
   cout << "#include \"theory/bv/theory_bv_utils.h\"" << endl;
   cout << "using namespace CVC4::kind;" <<endl;
   cout << "using namespace CVC4;" <<endl;
-  for (DefineFunctionCommand* command : commands) {
-    string code = get_code(command); 
+  //batch(smtlib);
+  vector<string> lines = get_lines(smtlib);
+  unique_ptr<api::Solver> solver;
+  solver.reset(new api::Solver());
+  for (string line : lines) {
+    DefineFunctionCommand* command = get_command(line, solver);
+    counter = 0;
+    string code = get_code(command);
+    cout << "// " << line << endl;
     cout << code << endl << endl;
   }
   return 0;
