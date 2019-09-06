@@ -8,4 +8,4 @@ clean:
 	rm -rf *.out
 
 test: 
-	./test.sh
+	./test.sh tests/test.smt2
