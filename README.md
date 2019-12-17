@@ -1,14 +1,14 @@
 # smtlib2cvc4
 
-##Prerequisites
+## Prerequisites
 - All of CVC4 requirements
 - clang-format
 
-##Installation
+## Installation
 - `./configure.sh`
 - `make`
 
-##Usage
+## Usage
 ```
 ./smtlib2cvc4.sh <path>
 ```
