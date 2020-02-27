@@ -204,28 +204,30 @@ vector<string> gen_var_def(Expr e, unordered_map<Expr, pair<string, vector<strin
 }
 
 string cache_to_code(unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache, Expr e) {
-  list<string> definitions;
   vector<Expr> toVisit;
-  vector<Expr> visited;
+  vector<Expr> order_of_definitions_with_dups;
   toVisit.push_back(e);
   while (! toVisit.empty()) {
     Expr current = toVisit.back();
     toVisit.pop_back();
-    if (! is_in(current, visited)) {
-      for (Expr child : current) {
-        toVisit.push_back(child);
-      }
-      string name = cache[current].first;
-      vector<string> def = cache[current].second;
-      if (def.size() != 0) {
-        definitions.insert(definitions.begin(), def.begin(), def.end());
-      }
-      visited.push_back(current);
+    for (Expr child : current) {
+      toVisit.push_back(child);
+    }
+    order_of_definitions_with_dups.insert(order_of_definitions_with_dups.begin(), current);
+  }
+  vector<Expr> order_of_definitions_no_dups;
+  for (Expr e : order_of_definitions_with_dups) {
+    if (!is_in(e, order_of_definitions_no_dups)) {
+      order_of_definitions_no_dups.push_back(e);
     }
   }
   string result = "";
-  for (string def : definitions) {
-    result += def + "\n";
+  for (Expr e : order_of_definitions_no_dups) {
+    string name = cache[e].first;
+    vector<string> def = cache[e].second;
+    for (string d : def) {
+      result += d + "\n";
+    }
   }
   return result;
 }
