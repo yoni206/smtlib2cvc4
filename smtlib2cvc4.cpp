@@ -20,6 +20,7 @@ using namespace CVC4::language::input;
 using namespace std;
 
 static int counter = 0;
+static bool cvc4_flag;
 
 //from https://thispointer.com/find-and-replace-all-occurrences-of-a-sub-string-in-c/
 void findAndReplaceAll(std::string & data, std::string toSearch, std::string replaceStr)
@@ -39,13 +40,11 @@ void findAndReplaceAll(std::string & data, std::string toSearch, std::string rep
 
 void print_list(list<string> lis) {
   for (string s : lis) {
-    cout << "panda s = " << s << endl;
   }
 }
 
 void print_vec(vector<string> vec) {
   for (string v : vec) {
-    cout << " panda v = " << v << endl;
   }
 }
 
@@ -120,22 +119,59 @@ string gen_var_name(Expr e) {
   return result;
 }
 
-string mk_node(Expr e, vector<string> defined_children) {
+string create_extract_node(string s, int high, int low) {
   stringstream ss;
-  if (e.getKind() == kind::BITVECTOR_EXTRACT) {
-    int low =  e.getOperator().getConst<BitVectorExtract>().low;
-    int high = e.getOperator().getConst<BitVectorExtract>().high;
-    ss << "CVC4::theory::bv::utils::mkExtract(" << defined_children[0] << ", " << high << ", " <<  low << ");";
+  if (cvc4_flag) {
+    ss << "CVC4::theory::bv::utils::mkExtract(" << s << ", " << high << ", " <<  low << ");";
   } else {
-    Kind k = e.getKind();
-    ss <<  "nm->mkNode(" << k;
+    ss << "solver_->make_term(solver_->make_op(Extract, " << high << ", " << low << "),"  << s << ");";
+  }
+  return ss.str();
+}
+
+string cvc4_kind_to_smt_switch_op(Kind k) {
+  switch (k) {
+    case PLUS : return "Plus";
+    case MINUS: return "Minus";
+    case MULT: return "Mult";
+    case ITE: return "Ite";
+    default: cout << k << endl; 
+             assert(false);
+             return "";
+  }
+}
+
+string cvc4_kind_to_smt_switch_sort(string k_str) {
+  return k_str;
+}
+
+string create_ordinary_node(Kind k, vector<string> defined_children) {
+    stringstream ss;
+    if (cvc4_flag) {
+      ss <<  "nm->mkNode(" << k;
+    } else {
+      ss << "solver_->make_term(" << cvc4_kind_to_smt_switch_op(k);
+    }
     for (string child : defined_children) {
       ss <<  ", " << child;
     }
     ss << ");";
+    return ss.str();
+}
+
+string mk_node(Expr e, vector<string> defined_children) {
+  stringstream ss;
+  Kind k = e.getKind();
+  if (k == kind::BITVECTOR_EXTRACT) {
+    int low =  e.getOperator().getConst<BitVectorExtract>().low;
+    int high = e.getOperator().getConst<BitVectorExtract>().high;
+    ss << create_extract_node(defined_children[0], high, low);
+  } else {
+    ss << create_ordinary_node(k, defined_children);
   }
   return ss.str();
 }
+
 
 
 //Special consts like 00... 1000... or 01111 should not be taken literally
@@ -166,7 +202,37 @@ vector<string> adjust_special_consts(Expr e, BitVector b, vector<Expr> formals, 
   }
   result.push_back(ss_def.str());
   return result;
-  // ss_def <<  "nm->mkConst<" << k << ">(BitVector(\"" << b << "\"));";
+}
+
+vector<string> get_bv_constant(Expr e, BitVector b, vector<Expr> formals, unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache) {
+  vector<string> result;
+  if (cvc4_flag) {
+     result = adjust_special_consts(e, b, formals, cache);
+  } else {
+    cout << "we don't support bv constant on smt-switch just yet" << endl;
+    assert(false);
+  }
+  return result;
+}
+string get_const_def(unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache, Expr e, string k_str) {
+  stringstream ss;
+  if (cvc4_flag) {
+      ss << "Node " <<  cache[e].first << " = " << "nm->mkConst<" << k_str << ">(" << e << ");";
+  } else {
+      stringstream ss_tmp;
+      ss << "Term " << cache[e].first << " = " << "solver_->make_term(" << e << ", " << cvc4_kind_to_smt_switch_sort(k_str) << ");";
+  }
+  return ss.str();
+}
+
+string get_compound_def(unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache, Expr e, vector<string> defined_children) {
+    stringstream ss;
+    if (cvc4_flag) {
+      ss << "Node " << cache[e].first << " = " << mk_node(e, defined_children);
+    } else {
+      ss << "Term "<< cache[e].first << " = " << mk_node(e, defined_children);
+    } 
+    return ss.str();
 }
 
 vector<string> gen_var_def(Expr e, unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache, vector<Expr> formals) {
@@ -175,18 +241,19 @@ vector<string> gen_var_def(Expr e, unordered_map<Expr, pair<string, vector<strin
   if (num_of_children == 0) {
     if (e.isConst()) {
       stringstream ss_kind;
-      ss_kind << e.getKind();
-      string k = ss_kind.str();
-      k = k.substr(string("CONST_").size());
-      k = k.substr(0,1) +  to_lower(k.substr(1));
+      Kind k = e.getKind();
+      ss_kind << k;
+      string k_str = ss_kind.str();
+      k_str = k_str.substr(string("CONST_").size());
+      k_str = k_str.substr(0,1) +  to_lower(k_str.substr(1));
       string def;
-      if (k == "Bitvector") {
-        k = "BitVector";
+      if (k_str == "Bitvector") {
+        k_str = "BitVector";
         BitVector b = e.getConst<BitVector>();
-        result = adjust_special_consts(e, b, formals, cache);
+        result = get_bv_constant(e, b, formals, cache);
       } else {
         stringstream ss_def;
-        ss_def << "Node " <<  cache[e].first << " = " << "nm->mkConst<" << k << ">(" << e << ");";
+        ss_def << get_const_def(cache, e, k_str);
         result.push_back(ss_def.str());
       }
     }  
@@ -196,9 +263,7 @@ vector<string> gen_var_def(Expr e, unordered_map<Expr, pair<string, vector<strin
     for (Expr child : e) {
       defined_children.push_back(cache[child].first);
     }
-    stringstream ss;
-    ss << "Node " << cache[e].first << " = " << mk_node(e, defined_children);
-    result.push_back(ss.str());
+    result.push_back(get_compound_def(cache, e, defined_children));
   }
   return result;
 }
@@ -232,6 +297,39 @@ string cache_to_code(unordered_map<Expr, pair<string, vector<string>>, ExprHashF
   return result;
 }
 
+string get_function_sig(string prefix, Expr func, vector<Expr> formals) {
+  stringstream ss;
+  if (cvc4_flag) {
+    ss << "Node ";
+  } else {
+    ss << "Term ";
+  }
+  ss << prefix << func << "(";
+  for (int i=0; i< formals.size(); i++) {
+    Expr formal = formals[i];
+    if (cvc4_flag) {
+      ss << "Node " << formal;
+    } else {
+      ss << "Term " << formal;
+    }
+    if (i < formals.size() - 1) {
+      ss << ", ";
+    }
+  }
+  ss << ")";
+  return ss.str();
+}
+
+string get_function_body(unordered_map<Expr, pair<string, vector<string>>, ExprHashFunction> cache, Expr formula) {
+  stringstream ss;
+  if (cvc4_flag) {
+    ss << "NodeManager* nm = NodeManager::currentNM();" << endl ; 
+  } 
+  string body = cache_to_code(cache, formula);
+  ss << body << "return " << cache[formula].first << ";";
+  ss << endl;
+  return ss.str();
+}
 
 string get_code(DefineFunctionCommand* command, string prefix="") {
   Expr formula = command->getFormula();
@@ -268,19 +366,9 @@ string get_code(DefineFunctionCommand* command, string prefix="") {
     }
   }
   stringstream ss;
-  ss << "Node " << prefix << func << "(";
-  for (int i=0; i< formals.size(); i++) {
-    Expr formal = formals[i];
-    ss << "Node " << formal;
-    if (i < formals.size() - 1) {
-      ss << ", ";
-    }
-  }
-  ss << ") {" << endl;
-  ss << "NodeManager* nm = NodeManager::currentNM();" << endl ;
-  string body = cache_to_code(cache, formula);
-  ss << body << "return " << cache[formula].first << ";";
-  ss << endl;
+  ss << get_function_sig(prefix, func, formals);
+  ss << " {" << endl;
+  ss << get_function_body(cache, formula);
   ss << "}";
   return ss.str();
 }
@@ -309,12 +397,23 @@ vector<string> get_lines(string str) {
   return cont;
 }
 
+void print_preamble() {
+  if (cvc4_flag) {
+    cout << "#include \"theory/bv/theory_bv_utils.h\"" << endl;
+    cout << "#include <math.h>" << endl;
+    cout << "using namespace CVC4::kind;" <<endl;
+    cout << "using namespace CVC4;" <<endl;
+  } else {
+    cout << "#include \"smt-switch/smt.h\"" << endl;
+    cout << "using namespace smt;" << endl;
+  }
+}
+
 int main(int argc, char *argv[]) {
   string smtlib = file_to_string(argv[1]);
-  cout << "#include \"theory/bv/theory_bv_utils.h\"" << endl;
-  cout << "#include <math.h>" << endl;
-  cout << "using namespace CVC4::kind;" <<endl;
-  cout << "using namespace CVC4;" <<endl;
+  assert((argv[2] == string("cvc4")) || (argv[2] == string("smt-switch")));
+  cvc4_flag = (argv[2] == string("cvc4"));
+  print_preamble();
   //batch(smtlib);
   vector<string> lines = get_lines(smtlib);
   unique_ptr<api::Solver> solver;
