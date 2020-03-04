@@ -124,33 +124,41 @@ string create_extract_node(string s, int high, int low) {
   if (cvc4_flag) {
     ss << "CVC4::theory::bv::utils::mkExtract(" << s << ", " << high << ", " <<  low << ");";
   } else {
-    ss << "solver_->make_term(solver_->make_op(Extract, " << high << ", " << low << "),"  << s << ");";
+    ss << "solver->make_term(solver->make_op(Extract, " << high << ", " << low << "),"  << s << ");";
   }
   return ss.str();
 }
 
-string cvc4_kind_to_smt_switch_op(Kind k) {
-  switch (k) {
-    case PLUS : return "Plus";
-    case MINUS: return "Minus";
-    case MULT: return "Mult";
-    case ITE: return "Ite";
-    default: cout << k << endl; 
-             assert(false);
-             return "";
+string cvc4_kind_to_smt_switch_op(string k) {
+  if (k == "PLUS") {
+    return "Plus";
+  } else if (k == "MINUS") {
+    return "Minus";
+  } else if (k == "MULT") {
+    return "Mult";
+  } else if (k == "ITE") {
+    return "Ite";
   }
+    cout << "support for smt-switch output does not yet include the operator " << k << endl; 
+    assert(false);
 }
 
-string cvc4_kind_to_smt_switch_sort(string k_str) {
-  return k_str;
+string cvc4_kind_to_smt_switch_sort(string k) {
+  if (k == "Rational") {
+    return "solver->make_sort(INT)";
+  }
+    cout << "support for smt-switch output does not yet include the sort " << k << endl; 
+    assert(false);
 }
 
 string create_ordinary_node(Kind k, vector<string> defined_children) {
+    stringstream ks;
+    ks << k;
     stringstream ss;
     if (cvc4_flag) {
       ss <<  "nm->mkNode(" << k;
     } else {
-      ss << "solver_->make_term(" << cvc4_kind_to_smt_switch_op(k);
+      ss << "solver->make_term(" << cvc4_kind_to_smt_switch_op(ks.str());
     }
     for (string child : defined_children) {
       ss <<  ", " << child;
@@ -163,8 +171,8 @@ string mk_node(Expr e, vector<string> defined_children) {
   stringstream ss;
   Kind k = e.getKind();
   if (k == kind::BITVECTOR_EXTRACT) {
-    int low =  e.getOperator().getConst<BitVectorExtract>().low;
-    int high = e.getOperator().getConst<BitVectorExtract>().high;
+    int low =  e.getOperator().getConst<BitVectorExtract>().d_low;
+    int high = e.getOperator().getConst<BitVectorExtract>().d_high;
     ss << create_extract_node(defined_children[0], high, low);
   } else {
     ss << create_ordinary_node(k, defined_children);
@@ -220,7 +228,7 @@ string get_const_def(unordered_map<Expr, pair<string, vector<string>>, ExprHashF
       ss << "Node " <<  cache[e].first << " = " << "nm->mkConst<" << k_str << ">(" << e << ");";
   } else {
       stringstream ss_tmp;
-      ss << "Term " << cache[e].first << " = " << "solver_->make_term(" << e << ", " << cvc4_kind_to_smt_switch_sort(k_str) << ");";
+      ss << "Term " << cache[e].first << " = " << "solver->make_term(" << e << ", " << cvc4_kind_to_smt_switch_sort(k_str) << ");";
   }
   return ss.str();
 }
@@ -316,6 +324,9 @@ string get_function_sig(string prefix, Expr func, vector<Expr> formals) {
       ss << ", ";
     }
   }
+  if (!cvc4_flag) {
+    ss << ", SmtSolver & solver";
+  }
   ss << ")";
   return ss.str();
 }
@@ -403,9 +414,6 @@ void print_preamble() {
     cout << "#include <math.h>" << endl;
     cout << "using namespace CVC4::kind;" <<endl;
     cout << "using namespace CVC4;" <<endl;
-  } else {
-    cout << "#include \"smt-switch/smt.h\"" << endl;
-    cout << "using namespace smt;" << endl;
   }
 }
 

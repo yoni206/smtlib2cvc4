@@ -1,4 +1,5 @@
-CVC4_HOME=<non-existing-path>
+CVC4_HOME=<non-existing-path-CVC4>
+SMT_SWITCH_HOME=<non-existing-path-SMT-SWITCH>
 CXXFLAGS=-no-pie -g
 
 smtlib2cvc4.out: smtlib2cvc4.cpp
@@ -8,4 +9,4 @@ clean:
 	rm -rf *.out
 
 test: 
-	./test.sh tests/test.smt2
+	./test.sh 
