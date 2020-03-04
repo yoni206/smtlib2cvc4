@@ -138,6 +138,16 @@ string cvc4_kind_to_smt_switch_op(string k) {
     return "Mult";
   } else if (k == "ITE") {
     return "Ite";
+  } else if (k == "EQUAL") {
+    return "Equal";
+  } else if (k == "GEQ") {
+    return "Ge";
+  } else if (k == "GT") {
+    return "Gt";
+  } else if (k == "LEQ") {
+    return "Le";
+  } else if (k == "LT") {
+    return "Lt";
   }
     cout << "support for smt-switch output does not yet include the operator " << k << endl; 
     assert(false);
@@ -414,6 +424,8 @@ void print_preamble() {
     cout << "#include <math.h>" << endl;
     cout << "using namespace CVC4::kind;" <<endl;
     cout << "using namespace CVC4;" <<endl;
+  } else {
+    cout << "using namespace smt;" << endl;
   }
 }
 
